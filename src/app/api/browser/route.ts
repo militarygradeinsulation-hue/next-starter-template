@@ -1,10 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AIBrowser } from '@/lib/ai-browser';
+import { MockAIBrowser } from '@/lib/mock-ai-browser';
 
 // Store browser instances (in production, use Redis or similar)
 const browserSessions = new Map<string, AIBrowser>();
+const mockBrowserSessions = new Map<string, MockAIBrowser>();
 
-function getOrCreateBrowser(sessionId: string): AIBrowser {
+// Check if we're in demo mode (no API key provided)
+const isDemoMode = !process.env.ANTHROPIC_API_KEY;
+
+function getOrCreateBrowser(sessionId: string): AIBrowser | MockAIBrowser {
+  if (isDemoMode) {
+    // Use mock browser for demo mode
+    let mockBrowser = mockBrowserSessions.get(sessionId);
+    if (!mockBrowser) {
+      mockBrowser = new MockAIBrowser();
+      mockBrowserSessions.set(sessionId, mockBrowser);
+    }
+    return mockBrowser;
+  }
+
+  // Use real browser with AI
   let browser = browserSessions.get(sessionId);
 
   if (!browser) {
@@ -45,6 +61,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      demoMode: isDemoMode,
       ...result,
     });
   } catch (error) {
@@ -52,7 +69,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : 'Unknown error occurred',
-        success: false
+        success: false,
+        demoMode: isDemoMode
       },
       { status: 500 }
     );
@@ -61,21 +79,13 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const sessionId = request.nextUrl.searchParams.get('sessionId') || 'default';
-    const browser = browserSessions.get(sessionId);
-
-    if (!browser) {
-      return NextResponse.json(
-        { error: 'No active browser session found' },
-        { status: 404 }
-      );
-    }
-
-    const state = await browser.getCurrentState();
-
+    // Return demo mode status
     return NextResponse.json({
       success: true,
-      ...state,
+      demoMode: isDemoMode,
+      message: isDemoMode
+        ? 'Running in demo mode. Add ANTHROPIC_API_KEY to enable AI features.'
+        : 'AI mode enabled',
     });
   } catch (error) {
     console.error('Get browser state error:', error);

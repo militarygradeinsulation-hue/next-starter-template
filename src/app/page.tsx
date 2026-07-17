@@ -22,6 +22,7 @@ export default function Home() {
   const [response, setResponse] = useState<BrowserResponse | null>(null);
   const [history, setHistory] = useState<Array<{ command: string; response: BrowserResponse }>>([]);
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null);
+  const [demoMode, setDemoMode] = useState<boolean>(false);
 
   const executeCommand = async () => {
     if (!command.trim()) return;
@@ -41,6 +42,7 @@ export default function Home() {
       if (data.success) {
         setResponse(data);
         setHistory(prev => [...prev, { command, response: data }]);
+        setDemoMode(data.demoMode || false);
 
         // Find the last screenshot
         const lastScreenshot = data.steps
@@ -53,6 +55,7 @@ export default function Home() {
         }
       } else {
         setResponse(data);
+        setDemoMode(data.demoMode || false);
       }
 
       setCommand('');
@@ -87,6 +90,11 @@ export default function Home() {
           <p className="text-slate-400 text-sm mt-1">
             Control a browser with natural language commands powered by Claude AI
           </p>
+          {demoMode && (
+            <div className="mt-2 text-xs bg-yellow-900/30 border border-yellow-700 rounded px-3 py-1.5 text-yellow-200 inline-block">
+              🎭 Demo Mode - Add ANTHROPIC_API_KEY to .env.local for real AI
+            </div>
+          )}
         </div>
       </header>
 
