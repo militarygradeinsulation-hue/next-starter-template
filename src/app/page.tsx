@@ -14,6 +14,7 @@ interface BrowserResponse {
   finalResult: string;
   currentUrl: string;
   error?: string;
+  demoMode?: boolean;
 }
 
 export default function Home() {
