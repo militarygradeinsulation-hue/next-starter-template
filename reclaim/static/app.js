@@ -46,7 +46,7 @@ function renderTable(){
   document.querySelectorAll('.pick').forEach(el=>el.addEventListener('change',()=>{const id=Number(el.dataset.id);el.checked?state.selected.add(id):state.selected.delete(id);$('selectAll').checked=filtered.every(w=>state.selected.has(w.id));}));
 }
 async function loadWallets(){
-  try{const d=await api('/api/wallets');state.wallets=d.wallets;state.selected=new Set([...state.selected].filter(id=>state.wallets.some(w=>w.id===id)));renderTable();refreshStats();$('networkState').textContent='LOCAL ENGINE';$('serverStatus').textContent='CONNECTED';await Promise.all([loadMonitor(),loadCandidates(),loadJobs()]);}
+  try{const d=await api('/api/wallets');state.wallets=d.wallets;state.selected=new Set([...state.selected].filter(id=>state.wallets.some(w=>w.id===id)));renderTable();refreshStats();$('networkState').textContent='LOCAL ENGINE';$('serverStatus').textContent='CONNECTED';await Promise.all([loadMonitor(),loadCandidates(),loadJobs(),loadBorrowerJobs()]);}
   catch(err){$('serverStatus').textContent='DISCONNECTED';$('networkState').textContent='ACCESS REQUIRED';toast(err.message,true);}
 }
 function switchView(name){
@@ -92,6 +92,7 @@ async function loadMonitor(){
   $('autoLast').textContent=scanner.last_result?`${scanner.last_result.scanned||0} OK / ${scanner.last_result.failed||0} ERR`:'—';
   $('indexStatus').textContent=result.indexed_activity_configured?'KEY CONFIGURED':'API KEY REQUIRED';
   $('queueAutoStatus').textContent=scanner.discovery_enabled?'ENABLED':'DISABLED';
+  $('borrowerAutoStatus').textContent=scanner.aave_borrower_enabled?'ENABLED':'DISABLED';
 }
 async function loadCandidates(){
   const result=await api('/api/opportunities');const found=result.candidates||[];
@@ -144,5 +145,39 @@ $('aaveScanBtn').addEventListener('click',e=>withLoading(e.currentTarget,async()
   await loadWallets();
 }));
 
+async function loadBorrowerJobs(){
+  const [jobsData,eventData]=await Promise.all([api('/api/aave/borrowers/jobs'),api('/api/aave/borrowers/events')]);
+  const jobs=jobsData.jobs||[];
+  $('borrowerJobCount').textContent=`${jobs.length} BORROWER QUEUES`;
+  $('borrowerEventsCount').textContent=`${Number(eventData.total_events||0).toLocaleString()} historical borrowing events indexed`;
+  $('borrowerJobRows').innerHTML=jobs.length?jobs.map(j=>{
+    const id=Number(j.id),active=j.status==='active';
+    const actions=active?`<button class="tiny-action" data-borrower-action="run" data-borrower-id="${id}">Index batch + check positions</button> <button class="tiny-action muted-action" data-borrower-action="pause" data-borrower-id="${id}">Pause</button>`:j.status==='paused'?`<button class="tiny-action" data-borrower-action="resume" data-borrower-id="${id}">Resume</button>`:'—';
+    return `<tr><td><span class="chain-pill">${escapeHTML(chainNames[j.chain]||j.chain)}</span></td><td>${Number(j.next_block)}</td><td>${Number(j.end_block)}</td><td>${Number(j.scanned_blocks)}</td><td>${Number(j.borrow_events)}</td><td><span class="state-pill ${j.status==='complete'?'good':''}">${escapeHTML(j.status)}</span></td><td>${actions}</td></tr>`;
+  }).join(''):'<tr><td colspan="7" class="empty-state">No borrower queues yet. Select a chain and block lookback above.</td></tr>';
+}
+$('borrowerJobForm').addEventListener('submit',e=>{e.preventDefault();withLoading(e.submitter,async()=>{
+  const chain=$('borrowerChain').value,lookback_blocks=Number($('borrowerLookback').value),blocks_per_run=Number($('borrowerBatch').value);
+  if(!Number.isSafeInteger(lookback_blocks)||lookback_blocks<1||lookback_blocks>250000)throw Error('Use 1–250000 blocks.');
+  const result=await post('/api/aave/borrowers/jobs',{chain,lookback_blocks,blocks_per_run,confirmations:20});
+  toast(`Aave borrower discovery created: ${result.start_block}–${result.end_block}.`);await loadBorrowerJobs();
+});});
+$('borrowerJobRows').addEventListener('click',e=>{
+  const button=e.target.closest('[data-borrower-action]');if(!button)return;
+  withLoading(button,async()=>{
+    const job_id=Number(button.dataset.borrowerId),action=button.dataset.borrowerAction;
+    const result=await post('/api/aave/borrowers/jobs/'+action,{job_id});
+    if(action==='run'){
+      const ids=result.wallet_ids||[];
+      let detail='';
+      if(ids.length){
+        try{const check=await post('/api/aave/scan',{ids});const good=check.results.filter(x=>x.status==='ok').length;const risky=check.results.filter(x=>x.candidate).length;detail=` ${good}/${ids.length} current position checks; ${risky} preliminary risk signal(s).`;}
+        catch(err){detail=' Position check unavailable; borrower events remain saved.';}
+      }
+      toast(`${result.blocks_processed} blocks, ${result.events_indexed} new borrow events, ${result.unique_borrowers_in_batch} borrowers.${detail}`);
+    }else toast(action==='pause'?'Borrower queue paused.':'Borrower queue resumed.');
+    await Promise.all([loadBorrowerJobs(),loadWallets()]);
+  });
+});
 $('saveToken').addEventListener('click',()=>{const t=$('apiToken').value.trim();t?sessionStorage.setItem('reclaim_api_token',t):sessionStorage.removeItem('reclaim_api_token');$('apiToken').value='';toast(t?'Token set for this browser tab.':'Session token cleared.');loadWallets();});
 loadWallets();

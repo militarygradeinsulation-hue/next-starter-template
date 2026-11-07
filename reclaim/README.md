@@ -77,3 +77,31 @@ This MVP scans **addresses supplied by the user or sampled from selected blocks 
 - Etherscan V2: https://docs.etherscan.io/ (API key is not committed, provider quotas and paid features vary)
 - RPC/price provider availability depends on network access. Unit tests mock external services and cost **zero** network calls. Live RPC/indexer calls have NOT been verified end to end in this environment.
 - The application contains no transaction signing or withdrawal code. Indexed age and Aave risk signals are **not** funds the application can control.
+
+
+## Phase 3: Borrower discovery from Aave V3 events
+
+The **Opportunity lab** now has an Aave borrower discovery queue that indexes verified `Borrow` events emitted by the official Aave V3 Pool contracts on Ethereum, Base, Arbitrum, and Polygon. Instead of scanning random wallet addresses, the discovery worker retrieves accounts on whose behalf borrowing occurred. The borrower is decoded from indexed `topic2` (`onBehalfOf`), not guessed from transaction sender. Event signature: `Borrow(address,address,address,uint256,uint8,uint256,uint16)`.
+
+1. Select a chain in the Opportunity lab and create a recent-block queue. Creation queries `eth_blockNumber` and reserves **20 blocks of confirmation distance** to reduce shallow reorg exposure. Default lookback is 5,000 blocks, and the batch size is 250 blocks (maximum 2,000).
+2. Press **Index batch + check positions**. Event logs are validated for Pool origin, topic hash, ABI address padding, block range, transaction hash, and log index; event entries are unique by `(chain, tx_hash, log_index)`. The queue advances its checkpoint only after successful validation and a committed SQLite transaction.
+3. New borrowers enter the existing watchlist with provenance `aave_borrow_event`. The dashboard then invokes `getUserAccountData` for up to 20 discovered borrowers in the batch. The live check is independent of event insertion; a failed position read does not erase already validated evidence.
+4. Re-run until complete or pause/resume. `AUTO_AAVE_BORROWER_ENABLED=1` can advance the latest active queue on each scanner tick, provided `AUTO_SCAN_INTERVAL_MINUTES` is positive.
+
+**Important:** Borrow event history does not establish an outstanding debt, current liquidation eligibility or profitability. Actual liquidation execution remains disabled. A position with a health factor below 1 is a *triage candidate only*. Trading still requires reserve-level debt/collateral data, close-factor confirmation, price-oracle normalization, available capital, live swap route, gas simulation, and competitive execution analysis.
+
+### API
+
+- `GET /api/aave/borrowers/jobs`: current Aave borrower indexing queues.
+- `POST /api/aave/borrowers/jobs`: create a queue from `chain`, `lookback_blocks`, `blocks_per_run`, and `confirmations`.
+- `POST /api/aave/borrowers/jobs/run`: index and checkpoint one batch using `job_id`.
+- `POST /api/aave/borrowers/jobs/pause` and `/resume`: pause/resume queue by `job_id`.
+- `GET /api/aave/borrowers/events`: inspect the latest on-chain event evidence, including raw block numbers and transaction hashes.
+
+### Additional scenario checks
+
+The hypothetical liquidation calculator now models Aave's documented V3 50%/100% close-factor split and minimum remaining balance constraints. It rejects a profitable flag when the modeled repayment exceeds the close factor, leaves prohibited dust, lacks collateral for the modeled bonus, or falls below `minimum_net_profit_usd`. It supports optional `flash_loan_fee_pct` and `mev_risk_usd`. **These rules are a preliminary gate, not a reserve-specific on-chain execution quote.**
+
+The first run requires a reliable EVM RPC endpoint with `eth_getLogs`. Public shared RPC endpoints frequently restrict log range, response size, or rate. Smaller batches and dedicated providers are recommended. An empty batch does not mean the full lookback has no borrowers.
+
+Sources: https://github.com/aave-dao/aave-v3-origin/blob/main/src/contracts/interfaces/IPool.sol and https://aave.com/help/borrowing/liquidations

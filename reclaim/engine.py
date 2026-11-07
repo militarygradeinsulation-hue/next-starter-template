@@ -174,26 +174,48 @@ def liquidation_simulator(params: dict) -> dict:
     swap_fee = number(params.get("swap_fee_usd", 0), "swap_fee_usd")
     slippage = number(params.get("slippage_pct", 0), "slippage_pct", maximum="100")
     capital = number(params.get("capital_cost_usd", 0), "capital_cost_usd")
+    flash_loan_pct = number(params.get("flash_loan_fee_pct", 0), "flash_loan_fee_pct", maximum="100")
+    mev_risk = number(params.get("mev_risk_usd", 0), "mev_risk_usd")
+    min_net_profit = number(params.get("minimum_net_profit_usd", 0), "minimum_net_profit_usd")
     hf = collateral * (threshold / 100) / debt if debt else None
     eligible_by_hf = hf is not None and hf < 1
-    # Aave close factors/caps and per-reserve configuration must be checked live separately.
+    # Aave v3 example-only close-factor screen. Reserve-specific policy can differ.
+    close_factor_pct = Decimal(100) if hf is not None and (
+        hf <= Decimal('0.95') or collateral < 2000 or debt < 2000) else Decimal(50)
+    close_cap = debt * close_factor_pct / 100
     insufficient = repayment <= 0 or repayment > debt
+    within_close_factor = repayment <= close_cap
     seized = min(repayment * (1 + bonus / 100), collateral)
+    remaining_debt = max(Decimal(0), debt - repayment)
+    remaining_collateral = max(Decimal(0), collateral - seized)
+    # Aave dust constraints: a partial liquidation must not leave sub-$1000 dust.
+    dust_rule_met = bool(remaining_debt == 0 or (
+        remaining_debt >= Decimal(1000) and remaining_collateral >= Decimal(1000)))
+    collateral_sufficient = repayment * (1 + bonus / 100) <= collateral
     gross = seized - repayment
-    costs = gas + swap_fee + capital + seized * slippage / 100
+    costs = gas + swap_fee + capital + seized * slippage / 100 + repayment * flash_loan_pct / 100 + mev_risk
     net = gross - costs
     fmt = lambda x: str(x.quantize(Decimal("0.01")))
     return {
         "health_factor": str(hf.quantize(Decimal("0.0001"))) if hf is not None else None,
         "hf_below_one": eligible_by_hf,
         "repayment_within_debt": not insufficient,
+        "close_factor_pct": fmt(close_factor_pct),
+        "maximum_repay_by_close_factor_usd": fmt(close_cap),
+        "repayment_within_close_factor": within_close_factor,
+        "remaining_debt_usd": fmt(remaining_debt),
+        "remaining_collateral_usd": fmt(remaining_collateral),
+        "partial_dust_rule_met": dust_rule_met,
+        "collateral_sufficient_for_bonus": collateral_sufficient,
+        "minimum_net_profit_usd": fmt(min_net_profit),
         "gross_profit_usd": fmt(gross),
         "estimated_costs_usd": fmt(costs),
         "estimated_net_usd": fmt(net),
-        "scenario_profitable": bool(eligible_by_hf and not insufficient and net > 0),
+        "scenario_profitable": bool(eligible_by_hf and not insufficient and within_close_factor
+                                      and dust_rule_met and collateral_sufficient and net > min_net_profit),
         "execution_ready": False,
         "warnings": [
-            "Hypothetical estimate only. Does not verify actual Aave position, reserves, close factor, oracle pricing, or available collateral.",
+            "Hypothetical estimate only. Close-factor and dust rules model Aave documentation but do not verify chain/reserve-specific rules, actual debt assets, collateral or oracle pricing.",
             "Competitive execution can fail and incur transaction fees. No signing or transaction broadcast is implemented.",
         ],
     }

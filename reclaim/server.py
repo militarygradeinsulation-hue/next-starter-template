@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from engine import CHAINS, discover_block, fetch_prices, liquidation_simulator, scan_wallet, validate_address, validate_chain
 from activity import index_activity
 from aave import read_position
+from aave_discovery import scan_borrow_events, current_safe_head, MAX_BLOCK_SPAN
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -90,6 +91,27 @@ def initialize():
           candidate integer not null
         );
         create index if not exists aave_wallet on aave_observations(wallet_id,id desc);
+        create table if not exists aave_borrower_jobs (
+          id integer primary key autoincrement, chain text not null,
+          next_block integer not null, end_block integer not null,
+          blocks_per_run integer not null default 250,
+          confirmations integer not null default 20,
+          scanned_blocks integer not null default 0,
+          borrow_events integer not null default 0,
+          status text not null default 'active',
+          created_at text not null default (datetime('now')),
+          updated_at text not null default (datetime('now')),
+          check(blocks_per_run between 1 and 2000),
+          check(next_block >= 0), check(end_block >= 0)
+        );
+        create table if not exists aave_borrow_events (
+          chain text not null, tx_hash text not null, log_index integer not null,
+          wallet_id integer not null references wallets(id) on delete cascade,
+          reserve text not null, block_number integer not null,
+          first_seen_at text not null default (datetime('now')),
+          primary key(chain, tx_hash, log_index)
+        );
+        create index if not exists aave_borrow_by_wallet on aave_borrow_events(wallet_id,block_number desc);
         create table if not exists discovery_jobs (
           id integer primary key autoincrement,
           chain text not null,
@@ -112,7 +134,7 @@ def add_wallets(chain, addresses, source="manual"):
     validate_chain(chain)
     if not isinstance(addresses, list) or len(addresses) > 100:
         raise ValueError("Supply at most 100 addresses")
-    if not isinstance(source, str) or source not in ("manual", "historical_block"):
+    if not isinstance(source, str) or source not in ("manual", "historical_block", "aave_borrow_event"):
         raise ValueError("Unsupported source")
     normalized = list(dict.fromkeys(validate_address(a) for a in addresses))
     with DB_LOCK, db() as c:
@@ -254,6 +276,93 @@ def resume_discovery_job(job_id):
     return {'job_id': job_id, 'status': 'active'}
 
 
+def create_aave_borrower_job(chain, lookback_blocks=5000, blocks_per_run=250, confirmations=20):
+    """Snapshot a finalized historical block range to discover Aave borrowers."""
+    chain = validate_chain(chain)
+    for name, value, minimum, maximum in (
+        ('lookback_blocks', lookback_blocks, 1, 250000),
+        ('blocks_per_run', blocks_per_run, 1, MAX_BLOCK_SPAN),
+        ('confirmations', confirmations, 1, 1000),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise ValueError(f'{name} must be an integer between {minimum} and {maximum}')
+    end_block = current_safe_head(chain, confirmations)
+    start_block = max(0, end_block - lookback_blocks + 1)
+    with DB_LOCK, db() as c:
+        c.execute('insert into aave_borrower_jobs(chain,next_block,end_block,blocks_per_run,confirmations) values(?,?,?,?,?)',
+                  (chain, start_block, end_block, blocks_per_run, confirmations))
+        job_id = c.execute('select last_insert_rowid()').fetchone()[0]
+    return {'job_id': job_id, 'chain': chain, 'start_block': start_block,
+            'end_block': end_block, 'confirmations': confirmations}
+
+
+def list_aave_borrower_jobs():
+    with db() as c:
+        rows = c.execute('select * from aave_borrower_jobs order by id desc limit 100').fetchall()
+    return [dict(row) for row in rows]
+
+
+def run_aave_borrower_job(job_id):
+    """Atomic cursor advancement: no skipped blocks on transient provider failure."""
+    if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
+        raise ValueError('Valid borrower job ID required')
+    with DB_LOCK:
+        with db() as c:
+            job = c.execute('select * from aave_borrower_jobs where id=?', (job_id,)).fetchone()
+        if job is None or job['status'] != 'active':
+            raise ValueError('Active borrower job not found')
+        first = job['next_block']
+        end = min(job['end_block'], first + job['blocks_per_run'] - 1)
+        if first > end:
+            raise ValueError('No remaining finalized blocks')
+        events = scan_borrow_events(job['chain'], first, end)
+        addresses = {ev['address'] for ev in events}
+        with db() as c:
+            for address in addresses:
+                c.execute('insert or ignore into wallets(chain,address,source) values(?,?,?)',
+                          (job['chain'], address, 'aave_borrow_event'))
+            wallet_ids = {row['address']: row['id'] for row in c.execute(
+                'select id,address from wallets where chain=? and address in (' +
+                ','.join('?' for _ in addresses) + ')',
+                (job['chain'], *addresses)).fetchall()} if addresses else {}
+            inserted = 0
+            for event in events:
+                cur = c.execute('insert or ignore into aave_borrow_events (chain,tx_hash,log_index,wallet_id,reserve,block_number) values(?,?,?,?,?,?)',
+                                (job['chain'],event['tx_hash'],event['log_index'],wallet_ids[event['address']],
+                                 event['reserve'],event['block_number']))
+                inserted += cur.rowcount
+            c.execute('update aave_borrower_jobs set next_block=?,scanned_blocks=scanned_blocks+?,borrow_events=borrow_events+?,status=?,updated_at=datetime(\'now\') where id=?',
+                      (end+1, end-first+1, inserted, 'complete' if end >= job['end_block'] else 'active', job_id))
+        return {'job_id': job_id, 'blocks_processed': end-first+1, 'events_indexed': inserted,
+                'unique_borrowers_in_batch': len(addresses), 'wallet_ids': list(wallet_ids.values())[:20],
+                'next_block': end+1, 'complete': end >= job['end_block'],
+                'position_verified': False, 'execution_ready': False}
+
+
+def change_aave_borrower_job(job_id, action):
+    if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
+        raise ValueError('Valid borrower job ID required')
+    if action not in ('pause', 'resume'):
+        raise ValueError('Unsupported action')
+    current = 'active' if action == 'pause' else 'paused'
+    target = 'paused' if action == 'pause' else 'active'
+    with DB_LOCK, db() as c:
+        updated = c.execute('update aave_borrower_jobs set status=?,updated_at=datetime(\'now\') where id=? and status=?',
+                            (target,job_id,current))
+        if not updated.rowcount:
+            raise ValueError('No matching active or paused borrower job')
+    return {'job_id': job_id, 'status': target}
+
+
+def query_borrower_events(limit=100):
+    with db() as c:
+        rows = c.execute('select e.chain,e.tx_hash,e.log_index,e.reserve,e.block_number,w.address,w.id as wallet_id from aave_borrow_events e join wallets w on w.id=e.wallet_id order by e.block_number desc limit ?',
+                         (min(250,max(1,limit)),)).fetchall()
+        total = c.execute('select count(*) from aave_borrow_events').fetchone()[0]
+    return {'events': [dict(row) for row in rows], 'total_events': total,
+            'current_debt_verified': False, 'execution_ready': False}
+
+
 def _get_wallet_ids(ids, maximum):
     if not isinstance(ids, list) or not 1 <= len(ids) <= maximum or any(
             isinstance(v, bool) or not isinstance(v, int) or v < 1 for v in ids):
@@ -349,6 +458,7 @@ class AutoScanner:
         self.last_result = None
         self.thread = None
         self.discovery_enabled = os.getenv('AUTO_DISCOVERY_ENABLED', '0') == '1'
+        self.aave_borrower_enabled = os.getenv('AUTO_AAVE_BORROWER_ENABLED', '0') == '1'
 
     def status(self):
         return {'enabled': bool(self.interval_seconds), 'interval_minutes': self.interval_seconds // 60,
@@ -356,6 +466,7 @@ class AutoScanner:
                 'next_run': datetime.fromtimestamp(self.next_run, timezone.utc).isoformat()
                 if self.next_run else None, 'last_result': self.last_result,
                 'mode': 'balances_and_optional_discovery', 'discovery_enabled': self.discovery_enabled,
+                'aave_borrower_enabled': self.aave_borrower_enabled,
                 'transactions_enabled': False}
 
     def tick(self):
@@ -380,6 +491,15 @@ class AutoScanner:
                     self.last_result['discovery_addresses'] = outcome['addresses_sampled']
                 except Exception:
                     self.last_result['discovery_error'] = 'Scheduled discovery scan failed'
+        if self.aave_borrower_enabled:
+            jobs = [j for j in list_aave_borrower_jobs() if j['status'] == 'active']
+            if jobs:
+                try:
+                    outcome = run_aave_borrower_job(jobs[-1]['id'])
+                    self.last_result['aave_borrow_events'] = outcome['events_indexed']
+                    self.last_result['aave_borrow_blocks'] = outcome['blocks_processed']
+                except Exception:
+                    self.last_result['aave_borrow_error'] = 'Automatic borrower index failed; checkpoint retained'
         self.last_run = datetime.now(timezone.utc).isoformat()
 
     def _loop(self):
@@ -465,10 +585,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"candidates": query_aave_candidates(), "execution_ready": False})
             elif path == "/api/discovery/jobs":
                 self._json({"jobs": list_discovery_jobs()})
+            elif path == "/api/aave/borrowers/jobs":
+                self._json({"jobs": list_aave_borrower_jobs()})
+            elif path == "/api/aave/borrowers/events":
+                self._json(query_borrower_events())
             elif path == "/api/monitor":
                 self._json({"scanner": AUTO_SCANNER.status() if AUTO_SCANNER else {"enabled": False},
                             "indexed_activity_configured": bool(os.getenv('ETHERSCAN_API_KEY')),
-                            "aave_read_only": True})
+                            "aave_read_only": True, "aave_borrower_jobs": len(list_aave_borrower_jobs())})
             elif path == "/api/chains":
                 self._json({"chains": [{"id": key, "name": val["label"], "symbol": val["symbol"]} for key, val in CHAINS.items()]})
             elif path == "/api/export.csv":
@@ -515,6 +639,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(pause_discovery_job(body.get('job_id')))
             elif path == "/api/discovery/jobs/resume":
                 self._json(resume_discovery_job(body.get('job_id')))
+            elif path == "/api/aave/borrowers/jobs":
+                result = create_aave_borrower_job(body.get('chain','ethereum'),
+                       body.get('lookback_blocks',5000), body.get('blocks_per_run',250),
+                       body.get('confirmations',20))
+                self._json(result,201)
+            elif path == "/api/aave/borrowers/jobs/run":
+                self._json(run_aave_borrower_job(body.get('job_id')))
+            elif path == "/api/aave/borrowers/jobs/pause":
+                self._json(change_aave_borrower_job(body.get('job_id'), 'pause'))
+            elif path == "/api/aave/borrowers/jobs/resume":
+                self._json(change_aave_borrower_job(body.get('job_id'), 'resume'))
             elif path == "/api/activity/scan":
                 self._json({"results": scan_activity_ids(body.get('ids', []))})
             elif path == "/api/aave/scan":
