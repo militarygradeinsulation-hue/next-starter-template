@@ -21,7 +21,7 @@
     </nav>
     <div class="sidebar-spacer"></div>
     <div class="sidebar-foot"><div class="heartbeat"><span class="pulse"></span> READ ONLY ENGINE</div><strong>Observe. Verify. Recover.</strong><p>Public blockchain analysis without custody or transaction execution.</p></div>
-    <div class="sidebar-bottom">BUILD 0.6.0 · READ ONLY</div>
+    <div class="sidebar-bottom">BUILD 0.7.0 · READ ONLY</div>
   </aside>
   <main class="main">
     <header class="topbar"><div class="breadcrumb">WORKSPACE <span>/</span> <b id="breadcrumb">INTELLIGENCE HUB</b></div><div class="top-actions"><span class="online-dot"></span><span id="networkState">LOCAL ENGINE</span><span class="divider-v"></span><span class="role-pill">ANALYST</span></div></header>
@@ -74,6 +74,8 @@
           <form id="reserveForm" class="queue-form"><button class="btn primary" type="submit">Read selected Aave positions (max 2)</button></form>
           <div class="monitor-bar"><span id="reserveAnalysisCount">0 ADDRESSES ANALYZED</span><span>VERIFIED RPC RESPONSES · NO PROFIT MODEL</span></div>
           <div class="table-scroll"><table class="candidate-table"><thead><tr><th>WALLET / CHAIN</th><th>HEALTH</th><th>RESERVE</th><th>COLLATERAL (ORACLE UNITS)</th><th>DEBT (ORACLE UNITS)</th><th>LIQUIDATION BONUS</th><th>STATUS</th><th>MARKET PRICE</th></tr></thead><tbody id="reserveRows"><tr><td colspan="8" class="empty-state">Select up to two addresses in Intelligence Hub, then analyze on-chain reserves.</td></tr></tbody></table></div>
+          <div class="monitor-bar"><span id="quoteHistoryCount">0 RECORDED PROVIDER QUOTES</span><span>90-SECOND FRESHNESS · READ ONLY</span></div>
+          <div class="table-scroll"><table class="candidate-table"><thead><tr><th>TIME</th><th>CHAIN</th><th>WALLET</th><th>SELL ASSET</th><th>QUOTED USDC</th><th>CHANGE, SAME SIZE</th><th>FRESHNESS</th></tr></thead><tbody id="quoteHistoryRows"><tr><td colspan="7" class="empty-state">No real provider prices recorded.</td></tr></tbody></table></div>
           <div class="queue-hint" id="marketQuoteResult">Select a recorded collateral reserve, then request its real USDC market price. Requires the server-side ZEROX_API_KEY. No quote is generated from sample data.</div>
           <div class="queue-hint">Values reflect observed Aave oracle units at the captured block, not estimated withdrawable amounts. Trading and transfers remain disabled.</div>
         </section>

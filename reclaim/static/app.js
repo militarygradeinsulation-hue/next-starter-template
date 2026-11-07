@@ -46,7 +46,7 @@ function renderTable(){
   document.querySelectorAll('.pick').forEach(el=>el.addEventListener('change',()=>{const id=Number(el.dataset.id);el.checked?state.selected.add(id):state.selected.delete(id);$('selectAll').checked=filtered.every(w=>state.selected.has(w.id));}));
 }
 async function loadWallets(){
-  try{const d=await api('/api/wallets');state.wallets=d.wallets;state.selected=new Set([...state.selected].filter(id=>state.wallets.some(w=>w.id===id)));renderTable();refreshStats();$('networkState').textContent='LOCAL ENGINE';$('serverStatus').textContent='CONNECTED';await Promise.all([loadMonitor(),loadCandidates(),loadJobs(),loadBorrowerJobs(),loadReserveAnalyses()]);}
+  try{const d=await api('/api/wallets');state.wallets=d.wallets;state.selected=new Set([...state.selected].filter(id=>state.wallets.some(w=>w.id===id)));renderTable();refreshStats();$('networkState').textContent='LOCAL ENGINE';$('serverStatus').textContent='CONNECTED';await Promise.all([loadMonitor(),loadCandidates(),loadJobs(),loadBorrowerJobs(),loadReserveAnalyses(),loadMarketHistory()]);}
   catch(err){$('serverStatus').textContent='DISCONNECTED';$('networkState').textContent='ACCESS REQUIRED';toast(err.message,true);}
 }
 function switchView(name){
@@ -104,6 +104,23 @@ async function loadCandidates(){
     return `<tr><td><a href="${url}" target="_blank" rel="noopener noreferrer">${shorten(addr)}</a></td><td>${escapeHTML(chainNames[p.chain]||p.chain)}</td><td>${escapeHTML(p.health_factor??'—')}</td><td><span class="state-pill">${p.snapshot_fresh?'RISK SIGNAL · UNVERIFIED':'STALE SIGNAL · RECHECK'}</span></td><td>${escapeHTML(date)}</td></tr>`;
   }).join(''):'<tr><td colspan="5" class="empty-state">No sub-1 Aave V3 risk signals have been recorded.</td></tr>';
 }
+async function loadMarketHistory(){
+  const response=await api('/api/market/history'), quotes=response.quotes||[];
+  $('quoteHistoryCount').textContent=`${quotes.length} RECORDED LIVE QUOTES`;
+  $('quoteHistoryRows').innerHTML=quotes.length?quotes.map(q=>{
+    const n=BigInt(q.buy_amount_raw), base=(n/1000000n).toLocaleString('en-US');
+    const fraction=(n%1000000n).toString().padStart(6,'0').replace(/0+$/,'');
+    const amount=fraction?`${base}.${fraction}`:base;
+    const delta=q.rate_change_bps==null?'—':`${Number(q.rate_change_bps)>0?'+':''}${escapeHTML(q.rate_change_bps)} bps`;
+    const label=q.freshness==='fresh'?`FRESH · ${Number(q.quote_age_seconds)}s`:'STALE';
+    const wallet=escapeHTML(q.address);
+    return `<tr><td>${escapeHTML(new Date(q.quoted_at).toLocaleString())}</td>
+      <td>${escapeHTML(chainNames[q.chain]||q.chain)}</td>
+      <td><a href="${explorer[q.chain]+wallet}" target="_blank" rel="noopener noreferrer">${shorten(wallet)}</a></td>
+      <td>${shorten(escapeHTML(q.sell_token))}</td><td>${amount} USDC</td>
+      <td>${delta}</td><td><span class="state-pill ${q.freshness==='fresh'?'good':''}">${label}</span></td></tr>`;
+  }).join(''):'<tr><td colspan="7" class="empty-state">No live provider quotes saved yet.</td></tr>';
+}
 async function loadReserveAnalyses(){
   const response=await api('/api/aave/reserves/analyses'), analyses=response.analyses||[];
   $('reserveAnalysisCount').textContent=`${analyses.length} REAL CONTRACT SNAPSHOTS`;
@@ -131,7 +148,8 @@ $('reserveRows').addEventListener('click',e=>{
     const fractional=(raw%1000000n).toString().padStart(6,'0').replace(/0+$/,'');
     const quoted=fractional?`${whole}.${fractional}`:whole;
     $('marketQuoteResult').textContent=`0x LIVE PRICE · ${data.collateral_symbol} → USDC · ${quoted} USDC for the recorded collateral-equivalent amount · block ${data.aave_snapshot_block} · observed ${new Date(data.quoted_at).toLocaleTimeString()} · NOT spendable collateral; NOT liquidation profit.`;
-    toast('Real provider price received. Trading remains disabled.');
+    await loadMarketHistory();
+    toast('Live provider price saved. Trading remains disabled.');
   });
 });
 $('reserveForm').addEventListener('submit',e=>{e.preventDefault();withLoading(e.submitter,async()=>{

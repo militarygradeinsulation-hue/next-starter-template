@@ -112,7 +112,8 @@ class ObservedCollateralTests(unittest.TestCase):
     def test_passes_observed_amount_only(self):
         self.store()
         reply = {'source':'0x','buy_amount_raw':'3010000000'}
-        with patch.object(server, 'live_market_price', return_value=reply) as quote:
+        with patch.object(server, 'live_market_price', return_value=reply) as quote, \
+             patch.object(server, 'save_real_market_quote', return_value={'quote_id': 1}):
             actual = server.quote_observed_collateral(self.id, TOKEN)
         quote.assert_called_once_with('base', TOKEN, '1000000000000000000', 100)
         self.assertEqual(actual['wallet_id'], self.id)

@@ -126,6 +126,17 @@ def initialize():
           execution_ready integer not null default 0 check(execution_ready=0)
         );
         create index if not exists aave_reserve_analysis_latest on aave_reserve_analyses(wallet_id,id desc);
+        create table if not exists market_quotes (
+          id integer primary key autoincrement,
+          wallet_id integer not null references wallets(id) on delete cascade,
+          chain text not null, sell_token text not null, buy_token text not null,
+          sell_amount_raw text not null, buy_amount_raw text not null,
+          aave_snapshot_block integer not null,
+          quoted_at text not null, recorded_at text not null,
+          source text not null, provider_price_impact text,
+          rate_change_bps text, comparable_quote_id integer
+        );
+        create index if not exists market_quotes_asset_wallet on market_quotes(wallet_id,sell_token,id desc);
         create table if not exists discovery_jobs (
           id integer primary key autoincrement,
           chain text not null,
@@ -513,12 +524,81 @@ def list_reserve_analyses(limit=40):
         rows.append({'id':entry['wallet_id'],'chain':entry['chain'],'address':entry['address'],
                      'block_number':entry['block_number'], 'analyzed_at':entry['analyzed_at'],
                      'health_factor':record['health_factor'],
-                     'reserves':record['reserves'], 'indicative_pairs':record['indicative_pairs'],
-                     'pairs_evaluated':record['pairs_evaluated'],
+                     'reserves':record.get('reserves',[]), 'pairs_evaluated':0,
                      'quote_currency':record['quote_currency'],
                      'emode_category':record['emode_category'],
                      'read_only':True, 'execution_ready':False})
     return rows
+
+
+def market_quote_history(wallet_id=None, limit=60, freshness_seconds=90):
+    """Recorded 0x data only. No past quote is an executable transaction."""
+    if type(limit) is not int or not 1 <= limit <= 200:
+        raise ValueError('Invalid history limit')
+    if wallet_id is not None and (type(wallet_id) is not int or wallet_id <= 0):
+        raise ValueError('Invalid wallet ID')
+    with db() as c:
+        if wallet_id is None:
+            rows=c.execute("""select q.*,w.address from market_quotes q join wallets w on w.id=q.wallet_id
+                              order by q.id desc limit ?""",(limit,)).fetchall()
+        else:
+            rows=c.execute("""select q.*,w.address from market_quotes q join wallets w on w.id=q.wallet_id
+                              where q.wallet_id=? order by q.id desc limit ?""",(wallet_id,limit)).fetchall()
+    now=datetime.now(timezone.utc)
+    result=[]
+    for row in rows:
+        item=dict(row)
+        age=int((now-datetime.fromisoformat(item['quoted_at'])).total_seconds())
+        item['quote_age_seconds']=max(0,age)
+        item['freshness']='fresh' if 0 <= age <= freshness_seconds else 'stale'
+        item['executable_quote']=False
+        item['liquidation_profit_usd']=None
+        result.append(item)
+    return result
+
+
+def save_real_market_quote(wallet_id, data):
+    """Compare only identical chain, pair and sell amount; preserve exact integers."""
+    from decimal import Decimal, localcontext
+    if type(wallet_id) is not int or wallet_id <= 0:
+        raise ValueError('Invalid wallet ID')
+    if data.get('source') != '0x Swap API v2 /swap/allowance-holder/price':
+        raise ValueError('Unexpected provider')
+    chain=validate_chain(data['chain'])
+    sell_token=validate_address(data['sell_token'])
+    buy_token=validate_address(data['buy_token'])
+    sell_amount,buy_amount=data['sell_amount_raw'],data['buy_amount_raw']
+    if any(not isinstance(x,str) or not x.isdecimal() or int(x)<=0 or len(x)>80
+           for x in (sell_amount,buy_amount)):
+        raise ValueError('Invalid provider amounts')
+    quoted_at=data['quoted_at']
+    captured=datetime.fromisoformat(quoted_at)
+    if captured.tzinfo is None or abs((datetime.now(timezone.utc)-captured).total_seconds())>90:
+        raise ValueError('Provider quote is stale')
+    block=data['aave_snapshot_block']
+    if type(block) is not int or block<=0:
+        raise ValueError('Missing observed block')
+    with DB_LOCK, db() as c:
+        previous=c.execute("""select id,buy_amount_raw from market_quotes
+          where wallet_id=? and chain=? and sell_token=? and buy_token=? and sell_amount_raw=?
+          order by id desc limit 1""",(wallet_id,chain,sell_token,buy_token,sell_amount)).fetchone()
+        change=None
+        if previous:
+            with localcontext() as ctx:
+                ctx.prec=70
+                raw=(Decimal(buy_amount)-Decimal(previous['buy_amount_raw']))*Decimal(10000)/Decimal(previous['buy_amount_raw'])
+                change=format(raw.quantize(Decimal('0.0001')),'f')
+        cursor=c.execute("""insert into market_quotes
+          (wallet_id,chain,sell_token,buy_token,sell_amount_raw,buy_amount_raw,aave_snapshot_block,
+           quoted_at,recorded_at,source,provider_price_impact,rate_change_bps,comparable_quote_id)
+          values(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+          (wallet_id,chain,sell_token,buy_token,sell_amount,buy_amount,block,quoted_at,
+           datetime.now(timezone.utc).isoformat(),data['source'],
+           data.get('estimated_price_impact'),change,previous['id'] if previous else None))
+        quote_id=cursor.lastrowid
+    return {'quote_id':quote_id,'rate_change_bps':change,
+            'compared_to_quote_id':previous['id'] if previous else None,
+            'freshness':'fresh','execution_ready':False}
 
 
 def quote_observed_collateral(wallet_id, sell_asset):
@@ -550,7 +630,8 @@ def quote_observed_collateral(wallet_id, sell_asset):
     if not isinstance(amount,str) or not amount.isdecimal() or int(amount)<=0:
         raise ValueError('No positive observed collateral quantity available')
     data = live_market_price(snapshot['chain'],asset,amount,snapshot['block_number'])
-    return {**data,'wallet_id':wallet_id,'collateral_symbol':reserve['symbol'],
+    saved=save_real_market_quote(wallet_id,data)
+    return {**data,**saved,'wallet_id':wallet_id,'collateral_symbol':reserve['symbol'],
             'collateral_decimals':reserve['decimals'],
             'source_explanation':'Aave underlying-equivalent collateral position. Quoted quantity is not spendable by RECLAIM and does not represent a liquidated amount.'}
 
@@ -700,6 +781,14 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/market/status":
                 self._json({"provider":"0x Swap API v2","configured":bool(os.getenv("ZEROX_API_KEY")),
                             "mode":"live_price_only","execution_enabled":False})
+            elif path == "/api/market/history":
+                from urllib.parse import parse_qs
+                params=parse_qs(urlparse(self.path).query)
+                value=params.get('wallet_id',[None])[0]
+                if value is not None and (not value.isdecimal() or int(value)<=0):
+                    raise ValueError('Invalid wallet ID')
+                self._json({"quotes":market_quote_history(wallet_id=int(value) if value else None),
+                            "execution_enabled":False})
             elif path == "/api/network/status":
                 self._json(live_provider_status())
             elif path == "/api/aave/reserves/analyses":
