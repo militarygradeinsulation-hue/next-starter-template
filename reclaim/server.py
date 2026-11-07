@@ -22,6 +22,7 @@ from activity import index_activity
 from aave import read_position
 from aave_discovery import scan_borrow_events, current_safe_head, MAX_BLOCK_SPAN
 from reserve_analysis import read_reserve_snapshot
+from market_price import live_market_price, MarketUnavailable
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -520,6 +521,40 @@ def list_reserve_analyses(limit=40):
     return rows
 
 
+def quote_observed_collateral(wallet_id, sell_asset):
+    """Quote only an actually observed fresh Aave collateral balance; never hypothetical input."""
+    if type(wallet_id) is not int or wallet_id <= 0:
+        raise ValueError('Valid wallet ID required')
+    asset = validate_address(sell_asset)
+    with db() as c:
+        entry = c.execute("""select s.snapshot_json,s.analyzed_at,w.chain,w.address
+                              from aave_reserve_analyses s join wallets w on w.id=s.wallet_id
+                              where s.wallet_id=? order by s.id desc limit 1""",(wallet_id,)).fetchone()
+    if entry is None:
+        raise ValueError('No recorded Aave reserve snapshot. Read this position first.')
+    # Reject stale data rather than using outdated amounts or quoting a fictional position.
+    snapshot = json.loads(entry['snapshot_json'])
+    captured = datetime.fromisoformat(snapshot['scanned_at'])
+    if captured.tzinfo is None:
+        raise ValueError('Snapshot lacks a timezone')
+    age = (datetime.now(timezone.utc)-captured).total_seconds()
+    if age < -10 or age > 120:
+        raise ValueError('Aave snapshot is stale. Refresh on-chain position first.')
+    if snapshot['chain'] != entry['chain'] or snapshot['address'].lower() != entry['address'].lower():
+        raise ValueError('Aave observation does not match tracked wallet')
+    reserve = next((r for r in snapshot.get('reserves', [])
+                    if r['asset'].lower()==asset and r.get('collateral_enabled')), None)
+    if reserve is None:
+        raise ValueError('Asset is not a recorded collateral reserve in this position')
+    amount = reserve['a_token_balance_raw']
+    if not isinstance(amount,str) or not amount.isdecimal() or int(amount)<=0:
+        raise ValueError('No positive observed collateral quantity available')
+    data = live_market_price(snapshot['chain'],asset,amount,snapshot['block_number'])
+    return {**data,'wallet_id':wallet_id,'collateral_symbol':reserve['symbol'],
+            'collateral_decimals':reserve['decimals'],
+            'source_explanation':'Aave underlying-equivalent collateral position. Quoted quantity is not spendable by RECLAIM and does not represent a liquidated amount.'}
+
+
 class AutoScanner:
     '''Optional bounded balance scanning, never automatic financial execution.'''
     def __init__(self):
@@ -662,6 +697,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"wallets": query_wallets()})
             elif path == "/api/opportunities":
                 self._json({"candidates": query_aave_candidates(), "execution_ready": False})
+            elif path == "/api/market/status":
+                self._json({"provider":"0x Swap API v2","configured":bool(os.getenv("ZEROX_API_KEY")),
+                            "mode":"live_price_only","execution_enabled":False})
             elif path == "/api/network/status":
                 self._json(live_provider_status())
             elif path == "/api/aave/reserves/analyses":
@@ -737,6 +775,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"results": scan_activity_ids(body.get('ids', []))})
             elif path == "/api/aave/scan":
                 self._json({"results": scan_aave_ids(body.get('ids', []))})
+            elif path == "/api/market/price":
+                self._json(quote_observed_collateral(body.get("wallet_id"),body.get("sell_asset")))
             elif path == "/api/aave/reserves/analyze":
                 self._json({"analyses": analyze_reserve_ids(body.get('ids', [])),
                             "read_only": True, "execution_ready": False})
@@ -744,6 +784,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Not found"}, 404)
         except (ValueError, json.JSONDecodeError) as exc:
             self._json({"error": str(exc)}, 400)
+        except MarketUnavailable as exc:
+            self._json({"error": str(exc), "provider_status":"unavailable"}, 503)
         except Exception as exc:
             self._json({"error": "Operation failed: " + str(exc)[:180]}, 502)
 

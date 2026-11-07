@@ -73,7 +73,8 @@
           <div class="panel-heading"><div><div class="eyebrow small">LIVE / AAVE RESERVE OBSERVATIONS</div><h2>Real debt and collateral by reserve</h2><p>Read reserve balances and oracle metadata directly from Aave at one block. No theoretical profits.</p></div></div>
           <form id="reserveForm" class="queue-form"><button class="btn primary" type="submit">Read selected Aave positions (max 2)</button></form>
           <div class="monitor-bar"><span id="reserveAnalysisCount">0 ADDRESSES ANALYZED</span><span>VERIFIED RPC RESPONSES · NO PROFIT MODEL</span></div>
-          <div class="table-scroll"><table class="candidate-table"><thead><tr><th>WALLET / CHAIN</th><th>HEALTH</th><th>RESERVE</th><th>COLLATERAL (ORACLE UNITS)</th><th>DEBT (ORACLE UNITS)</th><th>LIQUIDATION BONUS</th><th>STATUS</th></tr></thead><tbody id="reserveRows"><tr><td colspan="7" class="empty-state">Select up to two addresses in Intelligence Hub, then analyze on-chain reserves.</td></tr></tbody></table></div>
+          <div class="table-scroll"><table class="candidate-table"><thead><tr><th>WALLET / CHAIN</th><th>HEALTH</th><th>RESERVE</th><th>COLLATERAL (ORACLE UNITS)</th><th>DEBT (ORACLE UNITS)</th><th>LIQUIDATION BONUS</th><th>STATUS</th><th>MARKET PRICE</th></tr></thead><tbody id="reserveRows"><tr><td colspan="8" class="empty-state">Select up to two addresses in Intelligence Hub, then analyze on-chain reserves.</td></tr></tbody></table></div>
+          <div class="queue-hint" id="marketQuoteResult">Select a recorded collateral reserve, then request its real USDC market price. Requires the server-side ZEROX_API_KEY. No quote is generated from sample data.</div>
           <div class="queue-hint">Values reflect observed Aave oracle units at the captured block, not estimated withdrawable amounts. Trading and transfers remain disabled.</div>
         </section>
         <section class="panel monitor-panel" id="borrowerDiscovery">

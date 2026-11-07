@@ -30,3 +30,6 @@ Set `RPC_URL_ETHEREUM`, `RPC_URL_BASE`, `RPC_URL_ARBITRUM`, `RPC_URL_POLYGON` to
 ```sh
 python3 -m unittest discover -s tests -v
 ```
+
+## 0x live market prices (Phase 6)
+Configure `ZEROX_API_KEY` on the backend to enable live USDC route price requests for actual recorded Aave collateral reserves. The dashboard offers a **Live 0x price** action only for reserves with positive observed collateral quantities. Request `POST /api/market/price` with `{"wallet_id":1,"sell_asset":"0x..."}` after scanning the wallet in the past 120 seconds. This calls 0x API v2 `/swap/allowance-holder/price` with the actual equivalent underlying quantity read from Aave; it does **not** claim that collateral is owned by RECLAIM, available for transfer, liquidatable, or profitable. Provider key missing, unavailable liquidity, stale observation and malformed responses produce errors, never fabricated quotes. `GET /api/market/status` exposes configuration state without revealing the key. This is a price API only and neither requests an executable transaction nor signs one. Source: https://docs.0x.org/api-reference/evm-ap-is/swap/allowanceholder-getprice

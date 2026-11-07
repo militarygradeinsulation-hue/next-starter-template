@@ -118,9 +118,19 @@ async function loadReserveAnalyses(){
       <td>${escapeHTML(item.health_factor??'—')}</td><td>${r?escapeHTML(r.symbol):'No active reserves'}</td>
       <td>${r?escapeHTML(r.collateral_value_base):'—'}</td><td>${r?escapeHTML(r.debt_value_base):'—'}</td>
       <td>${r?(Number(r.liquidation_bonus_bps)/100).toFixed(2)+'%':'—'}</td>
-      <td><span class="state-pill">READ ONLY</span></td></tr>`;
+      <td><span class="state-pill">READ ONLY</span></td><td>${r&&r.collateral_enabled&&BigInt(r.a_token_balance_raw||'0')>0n?`<button class="tiny-action" data-market-id="${Number(item.id)}" data-market-asset="${escapeHTML(r.asset)}">Live 0x price</button>`:'—'}</td></tr>`;
   }).join(''):'<tr><td colspan="7" class="empty-state">No live Aave reserves read yet. Select a wallet in Intelligence Hub.</td></tr>';
 }
+$('reserveRows').addEventListener('click',e=>{
+  const button=e.target.closest('[data-market-id]');
+  if(!button)return;
+  withLoading(button,async()=>{
+    const data=await post('/api/market/price',{wallet_id:Number(button.dataset.marketId),sell_asset:button.dataset.marketAsset});
+    const quoted=(Number(data.buy_amount_raw)/1e6);
+    $('marketQuoteResult').textContent=`0x LIVE PRICE · ${escapeHTML(data.collateral_symbol)} → USDC · ${quoted.toLocaleString('en-US',{maximumFractionDigits:6})} USDC for the recorded collateral-equivalent amount · block ${data.aave_snapshot_block} · observed ${new Date(data.quoted_at).toLocaleTimeString()} · NOT spendable collateral; NOT liquidation profit.`;
+    toast('Real provider price received. Trading remains disabled.');
+  });
+});
 $('reserveForm').addEventListener('submit',e=>{e.preventDefault();withLoading(e.submitter,async()=>{
   const ids=[...state.selected];
   if(ids.length<1||ids.length>2)throw Error('Select one or two addresses in Intelligence Hub.');
