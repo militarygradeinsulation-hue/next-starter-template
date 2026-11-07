@@ -105,3 +105,17 @@ The hypothetical liquidation calculator now models Aave's documented V3 50%/100%
 The first run requires a reliable EVM RPC endpoint with `eth_getLogs`. Public shared RPC endpoints frequently restrict log range, response size, or rate. Smaller batches and dedicated providers are recommended. An empty batch does not mean the full lookback has no borrowers.
 
 Sources: https://github.com/aave-dao/aave-v3-origin/blob/main/src/contracts/interfaces/IPool.sol and https://aave.com/help/borrowing/liquidations
+
+
+## Phase 4: reserve-level Aave V3 screening
+
+The **Debt & collateral pairs** area (Opportunity Lab) can analyze up to two selected watchlist addresses per request. New `reserve_analysis.py` fetches `getUserAccountData`, `getUserConfiguration`, `getUserEMode`, `getReservesList`, per-reserve `getUserReserveData`, pool reserve configuration bitmap, and oracle prices, pinning all calls to the **same block**. It uses Aave address-book pool, oracle and protocol data-provider constants for Ethereum, Base, Arbitrum and Polygon. Active reserves are capped at 32 to avoid unbounded RPC usage.
+
+- `POST /api/aave/reserves/analyze` accepts `{ "ids": [1], "settings": { "gas_units": 650000, "slippage_bps": 100, "funding_fee_bps": 9, "min_net_usd": "10" } }`.
+- `GET /api/aave/reserves/analyses` returns the latest persisted per-wallet results with debt/collateral pairs and explicit blockers.
+- Estimates use on-chain oracle values, current Pool configuration, current network gas price, live native-token reference price when CoinGecko is available, and adjustable gas/slippage/funding assumptions.
+- **NO DEX swap quote, no on-chain transaction gas estimate for a full liquidation, no mempool/MEV cost estimate, no L2 data fee model and no liquidationCall simulation.** Pinned block state can become stale within seconds; some markets have version/eMode-dependent rules. `execution_ready` is always false. A positive indicative net must never be presented as verified, collectible or guaranteed revenue.
+- RPC providers must support repeated `eth_call` at a specific block. Paid RPC with rate limits is recommended for scaling. No private keys, signing, transactions, or cash-outs.
+- UI marks unverified results explicitly. To run unit tests: `python -m unittest discover -s tests -v`.
+
+Relevant protocol references: https://aave.com/docs/aave-v3/smart-contracts/pool and https://github.com/aave-dao/aave-address-book.

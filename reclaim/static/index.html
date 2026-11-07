@@ -21,7 +21,7 @@
     </nav>
     <div class="sidebar-spacer"></div>
     <div class="sidebar-foot"><div class="heartbeat"><span class="pulse"></span> READ ONLY ENGINE</div><strong>Observe. Verify. Recover.</strong><p>Public blockchain analysis without custody or transaction execution.</p></div>
-    <div class="sidebar-bottom">BUILD 0.2.0 · READ ONLY</div>
+    <div class="sidebar-bottom">BUILD 0.4.0 · READ ONLY</div>
   </aside>
   <main class="main">
     <header class="topbar"><div class="breadcrumb">WORKSPACE <span>/</span> <b id="breadcrumb">INTELLIGENCE HUB</b></div><div class="top-actions"><span class="online-dot"></span><span id="networkState">LOCAL ENGINE</span><span class="divider-v"></span><span class="role-pill">ANALYST</span></div></header>
@@ -68,6 +68,19 @@
           <div class="panel-heading"><div><div class="eyebrow small">LIVE / AAVE V3 HEALTH MONITOR</div><h2>Position intelligence</h2><p>Check selected addresses against official Aave V3 pool contracts. A health factor below one is a risk signal, not an executable transaction.</p></div><button class="btn primary" id="aaveScanBtn">◉ Check selected positions</button></div>
           <div class="monitor-bar"><span id="candidateCount">0 candidates flagged</span><span>LIVE READS · NO TRANSACTIONS</span></div>
           <div class="table-scroll"><table class="candidate-table"><thead><tr><th>ADDRESS</th><th>CHAIN</th><th>HEALTH FACTOR</th><th>STATUS</th><th>OBSERVED</th></tr></thead><tbody id="candidateRows"><tr><td colspan="5" class="empty-state">No risk signals yet. Select addresses in the Intelligence Hub and run the Aave position monitor.</td></tr></tbody></table></div>
+        </section>
+        <section class="panel monitor-panel" id="reserveAnalysis">
+          <div class="panel-heading"><div><div class="eyebrow small">PHASE 4 / RESERVE LEVEL RESEARCH</div><h2>Debt &amp; collateral pairs</h2><p>Read Aave reserve balances and on-chain liquidation bonuses at one block. Estimate gas using observed gas price plus adjustable gas units. Pair returns are indicative only: no executable swap route or full transaction simulation.</p></div></div>
+          <form id="reserveForm" class="queue-form">
+            <div><label for="reserveGas">ASSUMED GAS UNITS</label><input id="reserveGas" type="number" min="100000" max="5000000" step="1000" value="650000" required></div>
+            <div><label for="reserveSlip">SLIPPAGE ALLOWANCE (BPS)</label><input id="reserveSlip" type="number" min="0" max="5000" value="100" step="1" required></div>
+            <div><label for="reserveFunding">FUNDING FEE (BPS)</label><input id="reserveFunding" type="number" min="0" max="1000" value="9" step="1" required></div>
+            <div><label for="reserveMin">MIN INDICATIVE NET ($)</label><input id="reserveMin" type="number" min="0" max="1000000" value="10" step="0.01" required></div>
+            <button class="btn primary" type="submit">◇ Analyze selected (max 2)</button>
+          </form>
+          <div class="monitor-bar"><span id="reserveAnalysisCount">0 ADDRESSES ANALYZED</span><span>ON-CHAIN RESERVES · INDICATIVE ONLY</span></div>
+          <div class="table-scroll"><table class="candidate-table"><thead><tr><th>WALLET / CHAIN</th><th>HEALTH</th><th>DEBT ASSET</th><th>COLLATERAL ASSET</th><th>MAX REPAY</th><th>GROSS BONUS</th><th>EST. NET</th><th>VERIFY BEFORE TRADING</th></tr></thead><tbody id="reserveRows"><tr><td colspan="8" class="empty-state">Select up to two addresses in Intelligence Hub, then analyze on-chain reserves.</td></tr></tbody></table></div>
+          <div class="queue-hint">Every estimate is research-only. Live DEX quote, reserve-version dust constraints, L2 posting fees, MEV costs and transaction simulation remain unverified. Never interpret this figure as available cash.</div>
         </section>
         <section class="panel monitor-panel" id="borrowerDiscovery">
           <div class="panel-heading"><div><div class="eyebrow small">DISCOVER / AAVE V3 BORROW EVENTS</div><h2>Borrower discovery queue</h2><p>Discover borrowers directly from on-chain Aave Pool events. Historical borrowing is evidence of past activity, not active debt, liquidatability, or ownership.</p></div></div>

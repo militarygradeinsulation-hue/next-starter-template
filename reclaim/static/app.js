@@ -46,7 +46,7 @@ function renderTable(){
   document.querySelectorAll('.pick').forEach(el=>el.addEventListener('change',()=>{const id=Number(el.dataset.id);el.checked?state.selected.add(id):state.selected.delete(id);$('selectAll').checked=filtered.every(w=>state.selected.has(w.id));}));
 }
 async function loadWallets(){
-  try{const d=await api('/api/wallets');state.wallets=d.wallets;state.selected=new Set([...state.selected].filter(id=>state.wallets.some(w=>w.id===id)));renderTable();refreshStats();$('networkState').textContent='LOCAL ENGINE';$('serverStatus').textContent='CONNECTED';await Promise.all([loadMonitor(),loadCandidates(),loadJobs(),loadBorrowerJobs()]);}
+  try{const d=await api('/api/wallets');state.wallets=d.wallets;state.selected=new Set([...state.selected].filter(id=>state.wallets.some(w=>w.id===id)));renderTable();refreshStats();$('networkState').textContent='LOCAL ENGINE';$('serverStatus').textContent='CONNECTED';await Promise.all([loadMonitor(),loadCandidates(),loadJobs(),loadBorrowerJobs(),loadReserveAnalyses()]);}
   catch(err){$('serverStatus').textContent='DISCONNECTED';$('networkState').textContent='ACCESS REQUIRED';toast(err.message,true);}
 }
 function switchView(name){
@@ -105,6 +105,32 @@ async function loadCandidates(){
     return `<tr><td><a href="${url}" target="_blank" rel="noopener noreferrer">${shorten(addr)}</a></td><td>${escapeHTML(chainNames[p.chain]||p.chain)}</td><td>${escapeHTML(p.health_factor??'—')}</td><td><span class="state-pill">${p.snapshot_fresh?'RISK SIGNAL · UNVERIFIED':'STALE SIGNAL · RECHECK'}</span></td><td>${escapeHTML(date)}</td></tr>`;
   }).join(''):'<tr><td colspan="5" class="empty-state">No sub-1 Aave V3 risk signals have been recorded.</td></tr>';
 }
+async function loadReserveAnalyses(){
+  const d=await api('/api/aave/reserves/analyses'), analyses=d.analyses||[];
+  $('reserveAnalysisCount').textContent=`${analyses.length} ADDRESSES ANALYZED · LIVE EXECUTION DISABLED`;
+  const pairs=[];
+  for(const x of analyses){
+    for(const p of x.indicative_pairs||[])pairs.push({x,p});
+    if(!(x.indicative_pairs||[]).length)pairs.push({x,p:null});
+  }
+  $('reserveRows').innerHTML=pairs.length?pairs.slice(0,60).map(({x,p})=>{
+    const href=explorer[x.chain]+escapeHTML(x.address),
+      addr=`<a href="${href}" target="_blank" rel="noopener noreferrer">${shorten(escapeHTML(x.address))}</a>`;
+    const blockers=p?(p.blocking_reasons||[]).map(s=>escapeHTML(s.replaceAll('_',' '))).slice(0,4).join('; '):'No eligible reserve pairs at analysis block';
+    const net=p?.indicative_net_usd==null?'—':money(p.indicative_net_usd);
+    return `<tr><td>${addr}<div class="muted">${escapeHTML(chainNames[x.chain]||x.chain)} · block ${Number(x.block_number)}</div></td><td>${escapeHTML(x.health_factor??'—')}</td><td>${p?escapeHTML(p.debt_symbol):'—'}</td><td>${p?escapeHTML(p.collateral_symbol):'—'}</td><td>${p?money(p.max_indicative_repay_usd):'—'}</td><td>${p?money(p.gross_bonus_usd):'—'}</td><td>${net}</td><td><span class="state-pill">NOT EXECUTABLE</span><div class="muted">${blockers}</div></td></tr>`;
+  }).join(''):'<tr><td colspan="8" class="empty-state">No reserve analyses yet. Select wallets in Intelligence Hub first.</td></tr>';
+}
+$('reserveForm').addEventListener('submit',e=>{e.preventDefault();withLoading(e.submitter,async()=>{
+  const ids=[...state.selected];
+  if(ids.length<1||ids.length>2)throw Error('Select one or two wallet rows from Intelligence Hub first.');
+  const settings={gas_units:Number($('reserveGas').value),slippage_bps:Number($('reserveSlip').value),funding_fee_bps:Number($('reserveFunding').value),min_net_usd:$('reserveMin').value};
+  const r=await post('/api/aave/reserves/analyze',{ids,settings});
+  const ok=r.analyses.filter(x=>x.status==='ok').length;
+  toast(`${ok}/${ids.length} reserve positions analyzed. Execution is disabled.`,ok!==ids.length);
+  await loadReserveAnalyses();
+});});
+
 async function loadJobs(){
   const result=await api('/api/discovery/jobs');const jobs=result.jobs||[];
   $('queueCount').textContent=`${jobs.length} queues`;
