@@ -77,13 +77,12 @@ $('exportBtn').addEventListener('click',async()=>{
     const blob=await resp.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='reclaim-wallet-observations.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Observations exported.');}
   catch(err){toast(err.message,true);}
 });
-$('simForm').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;await withLoading(button,async()=>{
-  const obj=Object.fromEntries(new FormData(e.target));const result=await post('/api/simulate',obj);
-  $('resultNet').textContent=money(result.estimated_net_usd);$('resultHf').textContent=result.health_factor??'—';$('resultGross').textContent=money(result.gross_profit_usd);$('resultCosts').textContent=money(result.estimated_costs_usd);
-  const badge=$('resultBadge');badge.textContent=result.scenario_profitable?'POSITIVE HYPOTHETICAL SCENARIO':'NOT PROFITABLE / NOT ELIGIBLE';badge.classList.toggle('negative',!result.scenario_profitable);
-  toast('Scenario calculated. No transaction was executed.');
-});});
-
+$('verifyNetworksBtn').addEventListener('click',e=>withLoading(e.currentTarget,async()=>{
+  const response=await api('/api/network/status');const networks=response.networks||[];
+  $('liveNetworkResults').innerHTML=networks.map(n=>`<div class="setting-line"><span>${escapeHTML(chainNames[n.chain]||n.chain)}</span><strong>${n.status==='connected'?'CONNECTED · block '+Number(n.block_number):'UNAVAILABLE'}</strong></div>`).join('');
+  const failed=networks.filter(n=>n.status!=='connected').length;
+  toast(`${networks.length-failed}/${networks.length} networks live.`,failed>0);
+}));
 async function loadMonitor(){
   const result=await api('/api/monitor');
   const scanner=result.scanner||{};
@@ -106,28 +105,28 @@ async function loadCandidates(){
   }).join(''):'<tr><td colspan="5" class="empty-state">No sub-1 Aave V3 risk signals have been recorded.</td></tr>';
 }
 async function loadReserveAnalyses(){
-  const d=await api('/api/aave/reserves/analyses'), analyses=d.analyses||[];
-  $('reserveAnalysisCount').textContent=`${analyses.length} ADDRESSES ANALYZED · LIVE EXECUTION DISABLED`;
-  const pairs=[];
-  for(const x of analyses){
-    for(const p of x.indicative_pairs||[])pairs.push({x,p});
-    if(!(x.indicative_pairs||[]).length)pairs.push({x,p:null});
+  const response=await api('/api/aave/reserves/analyses'), analyses=response.analyses||[];
+  $('reserveAnalysisCount').textContent=`${analyses.length} REAL CONTRACT SNAPSHOTS`;
+  const rows=[];
+  for(const item of analyses){
+    for(const reserve of item.reserves||[])rows.push({item,reserve});
+    if(!(item.reserves||[]).length)rows.push({item,reserve:null});
   }
-  $('reserveRows').innerHTML=pairs.length?pairs.slice(0,60).map(({x,p})=>{
-    const href=explorer[x.chain]+escapeHTML(x.address),
-      addr=`<a href="${href}" target="_blank" rel="noopener noreferrer">${shorten(escapeHTML(x.address))}</a>`;
-    const blockers=p?(p.blocking_reasons||[]).map(s=>escapeHTML(s.replaceAll('_',' '))).slice(0,4).join('; '):'No eligible reserve pairs at analysis block';
-    const net=p?.indicative_net_usd==null?'—':money(p.indicative_net_usd);
-    return `<tr><td>${addr}<div class="muted">${escapeHTML(chainNames[x.chain]||x.chain)} · block ${Number(x.block_number)}</div></td><td>${escapeHTML(x.health_factor??'—')}</td><td>${p?escapeHTML(p.debt_symbol):'—'}</td><td>${p?escapeHTML(p.collateral_symbol):'—'}</td><td>${p?money(p.max_indicative_repay_usd):'—'}</td><td>${p?money(p.gross_bonus_usd):'—'}</td><td>${net}</td><td><span class="state-pill">NOT EXECUTABLE</span><div class="muted">${blockers}</div></td></tr>`;
-  }).join(''):'<tr><td colspan="8" class="empty-state">No reserve analyses yet. Select wallets in Intelligence Hub first.</td></tr>';
+  $('reserveRows').innerHTML=rows.length?rows.slice(0,60).map(({item,reserve:r})=>{
+    const address=escapeHTML(item.address), url=explorer[item.chain]+address;
+    return `<tr><td><a href="${url}" target="_blank" rel="noopener noreferrer">${shorten(address)}</a><div class="muted">${escapeHTML(chainNames[item.chain]||item.chain)} · block ${Number(item.block_number)}</div></td>
+      <td>${escapeHTML(item.health_factor??'—')}</td><td>${r?escapeHTML(r.symbol):'No active reserves'}</td>
+      <td>${r?escapeHTML(r.collateral_value_base):'—'}</td><td>${r?escapeHTML(r.debt_value_base):'—'}</td>
+      <td>${r?(Number(r.liquidation_bonus_bps)/100).toFixed(2)+'%':'—'}</td>
+      <td><span class="state-pill">READ ONLY</span></td></tr>`;
+  }).join(''):'<tr><td colspan="7" class="empty-state">No live Aave reserves read yet. Select a wallet in Intelligence Hub.</td></tr>';
 }
 $('reserveForm').addEventListener('submit',e=>{e.preventDefault();withLoading(e.submitter,async()=>{
   const ids=[...state.selected];
-  if(ids.length<1||ids.length>2)throw Error('Select one or two wallet rows from Intelligence Hub first.');
-  const settings={gas_units:Number($('reserveGas').value),slippage_bps:Number($('reserveSlip').value),funding_fee_bps:Number($('reserveFunding').value),min_net_usd:$('reserveMin').value};
-  const r=await post('/api/aave/reserves/analyze',{ids,settings});
-  const ok=r.analyses.filter(x=>x.status==='ok').length;
-  toast(`${ok}/${ids.length} reserve positions analyzed. Execution is disabled.`,ok!==ids.length);
+  if(ids.length<1||ids.length>2)throw Error('Select one or two addresses in Intelligence Hub.');
+  const response=await post('/api/aave/reserves/analyze',{ids});
+  const complete=response.analyses.filter(x=>x.status==='ok').length;
+  toast(`${complete}/${ids.length} positions read from live Aave contracts.`,complete!==ids.length);
   await loadReserveAnalyses();
 });});
 

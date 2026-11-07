@@ -1,4 +1,4 @@
-"""Phase 3 mock-driven tests; no internet or paid API required."""
+"""Offline test fixtures verify event-decoding correctness; production uses live RPC."""
 import pathlib
 import sys
 import tempfile
@@ -128,30 +128,3 @@ class BorrowerJobsTests(unittest.TestCase):
 
 if __name__=='__main__':unittest.main()
 
-class ScenarioGateTests(unittest.TestCase):
-    def test_50_percent_close_factor_on_marginal_liquidation(self):
-        import engine
-        # health = 8000*.8/6500 = 0.9846, close factor normally 50%.
-        result=engine.liquidation_simulator(dict(collateral_usd=8000,debt_usd=6500,
-            liquidation_threshold_pct=80,repay_usd=5000,bonus_pct=5))
-        self.assertTrue(result['hf_below_one'])
-        self.assertEqual(result['close_factor_pct'],'50.00')
-        self.assertEqual(result['maximum_repay_by_close_factor_usd'],'3250.00')
-        self.assertFalse(result['repayment_within_close_factor'])
-        self.assertFalse(result['scenario_profitable'])
-
-    def test_dust_rule_disallows_cheap_partial_remainder(self):
-        import engine
-        result=engine.liquidation_simulator(dict(collateral_usd=4000,debt_usd=3800,
-            liquidation_threshold_pct=80,repay_usd=3000,bonus_pct=5))
-        self.assertFalse(result['partial_dust_rule_met'])
-        self.assertFalse(result['scenario_profitable'])
-
-    def test_mev_and_flashloan_fees_count_in_cost(self):
-        import engine
-        result=engine.liquidation_simulator(dict(collateral_usd=8000,debt_usd=7000,
-            liquidation_threshold_pct=80,repay_usd=2000,bonus_pct=5,
-            flash_loan_fee_pct=0.1,mev_risk_usd=50,minimum_net_profit_usd=75))
-        self.assertEqual(result['gross_profit_usd'],'100.00')
-        self.assertEqual(result['estimated_costs_usd'],'52.00')
-        self.assertFalse(result['scenario_profitable'])

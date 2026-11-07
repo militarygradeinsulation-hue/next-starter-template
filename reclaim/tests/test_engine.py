@@ -5,7 +5,7 @@ import sys
 from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from engine import validate_address, validate_chain, scan_wallet, liquidation_simulator, discover_block
+from engine import validate_address, validate_chain, scan_wallet, discover_block
 import engine
 import server
 from decimal import Decimal
@@ -46,24 +46,6 @@ class EngineTests(unittest.TestCase):
     def test_discover_no_negative_blocks(self):
         with self.assertRaises(ValueError):
             discover_block('ethereum', -1)
-
-    def test_liquidation_profit(self):
-        scenario = liquidation_simulator(dict(collateral_usd=8000, debt_usd=7000, liquidation_threshold_pct=80,
-                                repay_usd=2000, bonus_pct=5, gas_usd=14, swap_fee_usd=7,
-                                slippage_pct=0.25, capital_cost_usd=3))
-        self.assertTrue(scenario['hf_below_one'])
-        self.assertEqual(scenario['gross_profit_usd'], '100.00')
-        self.assertEqual(scenario['estimated_net_usd'], '70.75')
-        self.assertTrue(scenario['scenario_profitable'])
-        self.assertFalse(scenario['execution_ready'])
-
-    def test_no_liquidation_when_hf_high(self):
-        self.assertFalse(liquidation_simulator(dict(collateral_usd=10000,debt_usd=2000,repay_usd=200))['scenario_profitable'])
-
-    def test_reject_negative_and_nan(self):
-        for arg in ({'gas_usd': -10}, {'gas_usd': 'NaN'}, {'bonus_pct': 200}):
-            with self.assertRaises(ValueError):
-                liquidation_simulator(arg)
 
 class SqliteTests(unittest.TestCase):
     def test_wallet_persistence_and_dedup(self):

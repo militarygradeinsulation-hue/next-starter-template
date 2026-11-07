@@ -17,11 +17,11 @@ import threading
 import time
 from urllib.parse import urlparse
 
-from engine import CHAINS, discover_block, fetch_prices, liquidation_simulator, scan_wallet, validate_address, validate_chain, number
+from engine import CHAINS, discover_block, fetch_prices, rpc_call, scan_wallet, validate_address, validate_chain, number
 from activity import index_activity
 from aave import read_position
 from aave_discovery import scan_borrow_events, current_safe_head, MAX_BLOCK_SPAN
-from reserve_analysis import analyze_live_position
+from reserve_analysis import read_reserve_snapshot
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
@@ -456,43 +456,45 @@ def query_aave_candidates():
 
 
 def analyze_reserve_ids(ids, settings=None):
-    """Explicit, bounded, read-only reserve analysis of up to two watched wallets.
-
-    Each analysis may require dozens of RPC calls. Results are stored only
-    after an entire consistent-block snapshot has been read successfully.
-    """
-    wallets = _get_wallet_ids(ids, 2)
-    options = settings if isinstance(settings, dict) else {}
-    if not isinstance(settings, (dict, type(None))):
-        raise ValueError('Settings must be an object')
-    def integer(key, default, minimum, maximum):
-        value = options.get(key, default)
-        if type(value) is not int or not minimum <= value <= maximum:
-            raise ValueError(f'{key} must be integer {minimum} to {maximum}')
-        return value
-    gas_units = integer('gas_units', 650000, 100000, 5000000)
-    slippage_bps = integer('slippage_bps', 100, 0, 5000)
-    funding_fee_bps = integer('funding_fee_bps', 9, 0, 1000)
-    min_profit = number(options.get('min_net_usd', 10), 'min_net_usd', maximum='1000000')
-    rows = []
-    for wallet in wallets:
+    """Read and persist actual Aave state, never estimated returns."""
+    if settings not in (None, {}):
+        raise ValueError('Synthetic profit settings are no longer supported')
+    rows=[]
+    for wallet in _get_wallet_ids(ids,2):
         try:
-            detail = analyze_live_position(wallet['chain'], wallet['address'],
-                gas_units=gas_units, slippage_bps=slippage_bps,
-                funding_fee_bps=funding_fee_bps, min_net_usd=min_profit)
-            if detail.get('execution_ready') is not False:
-                raise RuntimeError('Analysis unexpectedly indicated executable status')
+            detail=read_reserve_snapshot(wallet['chain'],wallet['address'])
+            if detail.get('read_only') is not True or detail.get('execution_ready') is not False:
+                raise RuntimeError('Unexpected execution status')
             with DB_LOCK, db() as c:
-                c.execute("""insert into aave_reserve_analyses (
-                    wallet_id,block_number,health_factor,reserve_count,pair_count,snapshot_json)
+                c.execute("""insert into aave_reserve_analyses
+                    (wallet_id,block_number,health_factor,reserve_count,pair_count,snapshot_json)
                     values (?,?,?,?,?,?)""",
                     (wallet['id'],detail['block_number'],detail['health_factor'],
-                     len(detail['reserves']),detail['pairs_evaluated'],json.dumps(detail)))
+                     len(detail['reserves']),0,json.dumps(detail)))
             rows.append({'id':wallet['id'],'status':'ok',**detail})
         except Exception:
             rows.append({'id':wallet['id'],'status':'error',
-                         'message':'Could not complete consistent-block Aave reserve analysis. Check RPC support and rate limits.'})
+                         'message':'Live Aave reserve read failed. Check RPC settings and rate limits.'})
     return rows
+
+
+def live_provider_status():
+    """Actual network identity and block height, explicitly unavailable on errors."""
+    expected={'ethereum':1,'base':8453,'arbitrum':42161,'polygon':137}
+    rows=[]
+    for chain in CHAINS:
+        timestamp=datetime.now(timezone.utc).isoformat()
+        try:
+            identity=int(rpc_call(chain,'eth_chainId',[]),16)
+            height=int(rpc_call(chain,'eth_blockNumber',[]),16)
+            if identity!=expected[chain] or height<=0:
+                raise RuntimeError('RPC chain ID or block invalid')
+            rows.append({'chain':chain,'status':'connected','chain_id':identity,
+                         'block_number':height,'observed_at':timestamp})
+        except Exception:
+            rows.append({'chain':chain,'status':'unavailable','chain_id':None,
+                         'block_number':None,'observed_at':timestamp})
+    return {'networks':rows,'source':'live_json_rpc','execution_enabled':False}
 
 
 def list_reserve_analyses(limit=40):
@@ -655,11 +657,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             if path == "/api/health":
-                self._json({"ok": True, "mode": "read_only", "storage": "sqlite", "chains": list(CHAINS), "aave_read_only": True, "reserve_screening": "indicative_read_only", "indexed_activity_configured": bool(os.getenv("ETHERSCAN_API_KEY"))})
+                self._json({"ok": True, "mode": "read_only", "storage": "sqlite", "chains": list(CHAINS), "aave_read_only": True, "reserve_screening": "live_onchain_only", "indexed_activity_configured": bool(os.getenv("ETHERSCAN_API_KEY"))})
             elif path == "/api/wallets":
                 self._json({"wallets": query_wallets()})
             elif path == "/api/opportunities":
                 self._json({"candidates": query_aave_candidates(), "execution_ready": False})
+            elif path == "/api/network/status":
+                self._json(live_provider_status())
             elif path == "/api/aave/reserves/analyses":
                 self._json({"analyses": list_reserve_analyses(), "execution_ready": False})
             elif path == "/api/discovery/jobs":
@@ -734,10 +738,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/aave/scan":
                 self._json({"results": scan_aave_ids(body.get('ids', []))})
             elif path == "/api/aave/reserves/analyze":
-                self._json({"analyses": analyze_reserve_ids(body.get('ids', []), body.get('settings')),
+                self._json({"analyses": analyze_reserve_ids(body.get('ids', [])),
                             "read_only": True, "execution_ready": False})
-            elif path == "/api/simulate":
-                self._json(liquidation_simulator(body))
             else:
                 self._json({"error": "Not found"}, 404)
         except (ValueError, json.JSONDecodeError) as exc:
