@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#080d12">
+  <title>RECLAIM | Blockchain Recovery Intelligence</title>
+  <meta name="description" content="Read-only blockchain intelligence, address discovery and liquidation scenario modeling.">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="logo"><div class="logo-mark">R<span>.</span></div><div><strong>RECLAIM</strong><small>RECOVERY INTELLIGENCE</small></div></div>
+    <div class="sidebar-label">WORKSPACE</div>
+    <nav class="side-nav" aria-label="Primary">
+      <button class="navlink active" data-nav="explorer"><span class="nav-symbol">◫</span> Intelligence hub</button>
+      <button class="navlink" data-nav="lab"><span class="nav-symbol">◇</span> Opportunity lab</button>
+      <button class="navlink" data-nav="settings"><span class="nav-symbol">⌘</span> Network settings</button>
+    </nav>
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-foot"><div class="heartbeat"><span class="pulse"></span> SCANNER ONLINE</div><strong>Observe. Verify. Recover.</strong><p>Public blockchain analysis without custody or transaction execution.</p></div>
+    <div class="sidebar-bottom">BUILD 0.1.0 · READ ONLY</div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><div class="breadcrumb">WORKSPACE <span>/</span> <b id="breadcrumb">INTELLIGENCE HUB</b></div><div class="top-actions"><span class="online-dot"></span><span id="networkState">LOCAL ENGINE</span><span class="divider-v"></span><span class="role-pill">ANALYST</span></div></header>
+    <div class="page">
+      <section class="view" id="view-explorer">
+        <div class="page-intro"><div><div class="eyebrow">BLOCKCHAIN VALUE INTELLIGENCE <span class="eyebrow-line"></span> LIVE SCANNING</div><h1>Discover what the chain <em>reveals.</em></h1><p>Find and analyze public balances. Separate stranded assets from opportunities that are actually executable.</p></div><button id="refreshBtn" class="btn ghost"><span>↻</span> Refresh data</button></div>
+        <div class="stat-grid">
+          <article class="stat"><div class="stat-title">TRACKED ADDRESSES <span>01</span></div><div class="stat-value" id="statTracked">0</div><div class="stat-foot"><span class="tiny-dot"></span> Across supported networks</div></article>
+          <article class="stat"><div class="stat-title">SUCCESSFULLY SCANNED <span>02</span></div><div class="stat-value" id="statScanned">0</div><div class="stat-foot"><span class="tiny-dot"></span> Live chain observations</div></article>
+          <article class="stat"><div class="stat-title">OBSERVED ASSET VALUE <span>03</span></div><div class="stat-value" id="statValue">—</div><div class="stat-foot"><span class="tiny-dot amber"></span> Indicative USD, not accessible funds</div></article>
+          <article class="stat accent-stat"><div class="stat-title">EXECUTABLE OPPORTUNITIES <span>04</span></div><div class="stat-value">0<span class="suffix"> verified</span></div><div class="stat-foot">Execution engine not enabled</div></article>
+        </div>
+        <div class="section-grid">
+          <section class="panel action-panel"><div class="panel-heading"><div><div class="eyebrow small">01 / ACQUISITION</div><h2>Address discovery</h2><p>Import known wallet addresses or sample a historical block.</p></div><span class="panel-icon">⌁</span></div>
+            <form id="importForm"><label for="chainSelect">NETWORK</label><select id="chainSelect"><option value="ethereum">Ethereum</option><option value="base">Base</option><option value="arbitrum">Arbitrum</option><option value="polygon">Polygon</option></select><label for="addresses">WALLET ADDRESSES <span class="muted">one per line</span></label><textarea id="addresses" rows="3" placeholder="0x...&#10;0x..."></textarea><button class="btn primary full" type="submit"><span>＋</span> Add to watchlist</button></form>
+          </section>
+          <section class="panel action-panel"><div class="panel-heading"><div><div class="eyebrow small">02 / SOURCE INDEXING</div><h2>Historical block sampler</h2><p>Extract public transaction addresses from a specific block.</p></div><span class="panel-icon">▤</span></div>
+            <form id="discoverForm"><label for="discoverChain">NETWORK</label><select id="discoverChain"><option value="ethereum">Ethereum</option><option value="base">Base</option><option value="arbitrum">Arbitrum</option><option value="polygon">Polygon</option></select><label for="blockNumber">BLOCK NUMBER</label><input id="blockNumber" inputmode="numeric" type="number" min="0" step="1" placeholder="e.g. 16000000" required><div class="helper">Samples up to 75 unique addresses. This does not prove inactivity or abandonment.</div><button class="btn outline full" type="submit"><span>⌖</span> Discover addresses</button></form>
+          </section>
+        </div>
+        <section class="panel ledger"><div class="ledger-top"><div><div class="eyebrow small">03 / OBSERVATION LEDGER</div><h2>Wallet intelligence</h2><p>Balances are publicly visible; ownership and recoverability are not implied.</p></div><div class="ledger-actions"><button class="btn ghost" id="exportBtn">↓ Export CSV</button><button class="btn primary" id="scanBtn">◉ Scan selected</button></div></div>
+          <div class="table-tools"><div class="search-wrap"><span>⌕</span><input id="searchBox" type="search" placeholder="Filter by address or network..."></div><span class="table-count" id="tableCount">0 ADDRESSES</span></div>
+          <div class="table-scroll"><table><thead><tr><th><input type="checkbox" id="selectAll" aria-label="Select all visible"></th><th>ADDRESS</th><th>CHAIN</th><th>NATIVE BALANCE</th><th>USDC</th><th>EST. VALUE</th><th>LAST SCAN</th><th>STATUS</th></tr></thead><tbody id="walletRows"><tr><td colspan="8" class="empty-state">No addresses tracked. Add addresses or sample a historical block above.</td></tr></tbody></table></div>
+          <div class="ledger-footer"><span>Inactivity: unknown until a historical activity indexer is connected.</span><span id="scanStamp">NO SCANS YET</span></div>
+        </section>
+        <div class="notice"><span>ⓘ</span><div><b>Ownership is not determined by inactivity.</b> Wallet scanning is read-only. Transaction execution, private key access and withdrawals are not implemented. Scanned value is not recoverable revenue.</div></div>
+      </section>
+      <section class="view hidden" id="view-lab">
+        <div class="page-intro"><div><div class="eyebrow">OPPORTUNITY ENGINE <span class="eyebrow-line"></span> SIMULATION ONLY</div><h1>Model returns. <em>Before risking capital.</em></h1><p>A transparent scenario calculator for permissionless DeFi liquidations. Does not query a live lending position.</p></div></div>
+        <div class="lab-grid"><section class="panel lab-form"><div class="panel-heading"><div><div class="eyebrow small">HYPOTHETICAL INPUTS</div><h2>Liquidation model</h2><p>Enter assumptions to estimate costs and gross/net opportunity.</p></div></div><form id="simForm" class="sim-form"><div class="input-grid"><div><label>COLLATERAL VALUE ($)</label><input type="number" name="collateral_usd" min="0" step="any" value="8000" required></div><div><label>OUTSTANDING DEBT ($)</label><input type="number" name="debt_usd" min="0" step="any" value="7000" required></div><div><label>LIQUIDATION THRESHOLD (%)</label><input type="number" name="liquidation_threshold_pct" min="0" max="100" step="any" value="80"></div><div><label>REPAY AMOUNT ($)</label><input type="number" name="repay_usd" min="0" step="any" value="2000"></div><div><label>LIQUIDATION BONUS (%)</label><input type="number" name="bonus_pct" min="0" max="100" step="any" value="5"></div><div><label>NETWORK GAS ($)</label><input type="number" name="gas_usd" min="0" step="any" value="14"></div><div><label>SWAP FEES ($)</label><input type="number" name="swap_fee_usd" min="0" step="any" value="7"></div><div><label>SLIPPAGE (%)</label><input type="number" name="slippage_pct" min="0" max="100" step="any" value="0.25"></div><div><label>CAPITAL COST ($)</label><input type="number" name="capital_cost_usd" min="0" step="any" value="3"></div></div><button class="btn primary full" type="submit">◇ Calculate scenario</button></form></section>
+          <section class="panel lab-results"><div class="eyebrow small">ESTIMATED OUTCOME</div><div class="result-label">NET OPPORTUNITY</div><div class="result-amount" id="resultNet">—</div><span class="result-badge" id="resultBadge">RUN A SIMULATION</span><div class="result-rule"></div><div class="result-item"><span>Health factor</span><strong id="resultHf">—</strong></div><div class="result-item"><span>Gross theoretical bonus</span><strong id="resultGross">—</strong></div><div class="result-item"><span>Estimated costs</span><strong id="resultCosts">—</strong></div><div class="result-item"><span>Ready for execution</span><strong class="bad">NO · DISABLED</strong></div><p class="result-disclaimer">All figures depend on user assumptions. Real liquidations require on-chain health factor, reserve parameters, available collateral, close factors, funding and fee simulation. No orders are placed.</p></section></div>
+        <div class="notice"><span>ⓘ</span><div><b>Why a liquidation engine instead of private-key hunting?</b> Eligible liquidations are explicitly permissionless under the protocol rules. That creates a revenue mechanism that doesn't rely on accessing someone else's inactive wallet.</div></div>
+      </section>
+      <section class="view hidden" id="view-settings">
+        <div class="page-intro"><div><div class="eyebrow">SYSTEM CONFIGURATION <span class="eyebrow-line"></span> SECURITY FIRST</div><h1>Engine <em>configuration.</em></h1><p>Run locally by default. Public blockchain scanning and scenario analysis only.</p></div></div>
+        <div class="settings-grid"><section class="panel settings-card"><div class="eyebrow small">ENGINE STATUS</div><h2>Service connection</h2><div class="setting-line"><span>Server</span><strong id="serverStatus">CHECKING</strong></div><div class="setting-line"><span>Transactions</span><strong>DISABLED</strong></div><div class="setting-line"><span>Storage</span><strong>LOCAL SQLITE</strong></div><div class="setting-line"><span>Supported networks</span><strong>4 EVM</strong></div></section>
+          <section class="panel settings-card"><div class="eyebrow small">ACCESS CONTROL</div><h2>Backend access token</h2><p>Only needed if the backend is configured with an APP_TOKEN. Stored in this browser tab's session storage.</p><label for="apiToken">BEARER TOKEN</label><input id="apiToken" type="password" autocomplete="off" placeholder="Enter APP_TOKEN if configured"><button id="saveToken" class="btn outline full">Set token for this session</button></section>
+        </div><section class="panel settings-card"><div class="eyebrow small">WHAT WE VERIFY</div><h2>Execution safeguards</h2><div class="safety-grid"><div><span class="safety-icon">✓</span> No private key collection</div><div><span class="safety-icon">✓</span> Chain allowlist</div><div><span class="safety-icon">✓</span> Read-only RPC calls</div><div><span class="safety-icon">✓</span> No transaction signing</div><div><span class="safety-icon">✓</span> No swap or cash-out promises</div><div><span class="safety-icon">✓</span> Scoped, bounded scans</div></div></section>
+      </section>
+    </div>
+  </main>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
