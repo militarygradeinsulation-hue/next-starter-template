@@ -1,0 +1,25 @@
+name: Reclaim read-only engine CI
+on:
+  pull_request:
+    paths:
+      - 'reclaim/**'
+      - '.github/workflows/reclaim-ci.yml'
+  push:
+    paths:
+      - 'reclaim/**'
+      - '.github/workflows/reclaim-ci.yml'
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run read-only adapter tests
+        working-directory: reclaim
+        run: python -m unittest discover -s tests -v
+      - name: Validate browser JavaScript
+        run: node --check reclaim/static/app.js
